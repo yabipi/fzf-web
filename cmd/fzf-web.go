@@ -216,16 +216,16 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 	}
 
 	// 限制文件数量，避免处理过多文件
-	if len(files) > 10000 {
-		files = files[:10000]
-	}
+	//if len(files) > 10000 {
+	//	files = files[:10000]
+	//}
 
 	// 创建输入通道
 	inputChan := make(chan string, len(files))
-	
+
 	// 创建输出通道
 	outputChan := make(chan string, 100)
-	
+
 	// 创建结果收集通道
 	resultsChan := make(chan []SearchResult, 1)
 
@@ -349,7 +349,7 @@ func getAllFiles(dir string) ([]string, error) {
 func handleDownload(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")
 	searchDir := r.URL.Query().Get("dir") // 获取搜索目录参数
-	
+
 	if filePath == "" {
 		http.Error(w, "Missing file parameter", http.StatusBadRequest)
 		return
