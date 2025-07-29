@@ -234,10 +234,15 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 	}
 
 	// 限制文件数量，避免处理过多文件
-	if len(files) > 15000 {
-		files = files[:15000]
-		fmt.Printf("文件数量过多，限制为 %d 个文件进行搜索\n", len(files))
-	}
+
+	// if len(files) > 15000 {
+	// 	files = files[:15000]
+	// 	fmt.Printf("文件数量过多，限制为 %d 个文件进行搜索\n", len(files))
+	// }
+
+	//if len(files) > 10000 {
+	//	files = files[:10000]
+	//}
 
 	// 添加调试信息
 	fmt.Printf("开始搜索，查询: %s, 文件数量: %d\n", query, len(files))
