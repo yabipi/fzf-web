@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#4facfe">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="format-detection" content="telephone=no">
+    <title>FZF Web 搜索</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 0;
+            margin: 0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .container {
+            max-width: 100%;
+            margin: 0;
+            background: white;
+            border-radius: 0;
+            box-shadow: none;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 20px 16px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+        }
+        
+        .header p {
+            font-size: 0.95rem;
+            opacity: 0.9;
+            margin: 0;
+        }
+        
+        .search-section {
+            padding: 20px 16px;
+            background: #f8f9fa;
+        }
+        
+        .search-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .input-group {
+            width: 100%;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 16px;
+            border: 2px solid #e1e5e9;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: white;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #4facfe;
+            box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+        }
+        
+        .search-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            min-height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        .search-btn:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 8px rgba(79, 172, 254, 0.3);
+        }
+        
+        .search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .results-section {
+            padding: 0 16px 20px;
+        }
+        
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e1e5e9;
+        }
+        
+        .results-header h2 {
+            font-size: 1.2rem;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        .results-count {
+            font-size: 0.9rem;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4facfe;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .results-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .result-item {
+            background: white;
+            border: 1px solid #e1e5e9;
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        
+        .result-item:active {
+            transform: scale(0.98);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+            gap: 12px;
+        }
+        
+        .result-filename {
+            font-weight: 600;
+            color: #333;
+            font-size: 1rem;
+            flex: 1;
+            word-break: break-word;
+        }
+        
+        .result-size {
+            color: #666;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        
+        .result-path {
+            color: #888;
+            font-size: 0.85rem;
+            word-break: break-all;
+            line-height: 1.4;
+            margin-bottom: 12px;
+        }
+        
+        .download-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        .download-btn:active {
+            background: #218838;
+            transform: scale(0.98);
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #f5c6cb;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        
+        .empty-state h3 {
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 1.1rem;
+        }
+        
+        .debug-info {
+            background: #f8f9fa;
+            border: 1px solid #e1e5e9;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .debug-info h4 {
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        
+        .debug-info pre {
+            background: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e1e5e9;
+            overflow-x: auto;
+            font-size: 0.75rem;
+            line-height: 1.4;
+        }
+        
+        /* 移动端优化 */
+        @media (max-width: 768px) {
+            .header {
+                padding: 16px;
+            }
+            
+            .header h1 {
+                font-size: 1.6rem;
+            }
+            
+            .search-section {
+                padding: 16px;
+            }
+            
+            .results-section {
+                padding: 0 16px 16px;
+            }
+            
+            .result-item {
+                padding: 14px;
+            }
+            
+            .result-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            
+            .result-size {
+                align-self: flex-end;
+            }
+        }
+        
+        /* 小屏幕手机优化 */
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.4rem;
+            }
+            
+            .header p {
+                font-size: 0.85rem;
+            }
+            
+            .search-input {
+                padding: 14px;
+                font-size: 16px; /* 防止iOS缩放 */
+            }
+            
+            .search-btn {
+                padding: 14px 20px;
+                min-height: 48px;
+            }
+            
+            .result-item {
+                padding: 12px;
+            }
+            
+            .download-btn {
+                padding: 10px 16px;
+                min-height: 40px;
+                font-size: 13px;
+            }
+        }
+        
+        /* 横屏优化 */
+        @media (orientation: landscape) and (max-height: 500px) {
+            .header {
+                padding: 12px 16px;
+            }
+            
+            .header h1 {
+                font-size: 1.3rem;
+                margin-bottom: 4px;
+            }
+            
+            .header p {
+                font-size: 0.8rem;
+            }
+            
+            .search-section {
+                padding: 12px 16px;
+            }
+            
+            .search-form {
+                gap: 12px;
+            }
+        }
+        
+        /* 触摸设备优化 */
+        @media (hover: none) and (pointer: coarse) {
+            .search-btn:hover,
+            .result-item:hover,
+            .download-btn:hover {
+                transform: none;
+            }
+            
+            .search-btn:active,
+            .result-item:active,
+            .download-btn:active {
+                transform: scale(0.98);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 FZF Web 搜索</h1>
+            <p>使用 fzf 命令行工具进行文件搜索</p>
+        </div>
+        
+        <div class="search-section">
+            <form class="search-form" id="searchForm">
+                <div class="input-group">
+                    <label for="baseDirInput">搜索目录</label>
+                    <input type="text" id="baseDirInput" class="search-input" value="{{.BaseDir}}" placeholder="输入搜索目录路径...">
+                </div>
+                <div class="input-group">
+                    <label for="searchInput">搜索关键词</label>
+                    <input type="text" id="searchInput" class="search-input" placeholder="输入搜索关键词..." required>
+                </div>
+                <button type="submit" class="search-btn" id="searchBtn">
+                    <span id="searchBtnText">搜索</span>
+                </button>
+            </form>
+        </div>
+        
+        <div class="results-section">
+            <div id="debugInfo" class="debug-info" style="display: none;">
+                <h4>调试信息</h4>
+                <pre id="debugContent"></pre>
+            </div>
+            
+            <div id="resultsContainer" style="display: none;">
+                <div class="results-header">
+                    <h2>搜索结果</h2>
+                    <div class="results-count" id="resultsCount"></div>
+                </div>
+                <div id="resultsList" class="results-list"></div>
+            </div>
+            
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>正在搜索中...</p>
+            </div>
+            
+            <div id="error" class="error" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        // 移动端优化：防止双击缩放
+        let lastTouchEnd = 0;
+        document.addEventListener('touchend', function (event) {
+            const now = (new Date()).getTime();
+            if (now - lastTouchEnd <= 300) {
+                event.preventDefault();
+            }
+            lastTouchEnd = now;
+        }, false);
+
+        // 移动端优化：防止页面缩放
+        document.addEventListener('gesturestart', function (e) {
+            e.preventDefault();
+        });
+
+        const searchForm = document.getElementById('searchForm');
+        const searchInput = document.getElementById('searchInput');
+        const baseDirInput = document.getElementById('baseDirInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const searchBtnText = document.getElementById('searchBtnText');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const resultsList = document.getElementById('resultsList');
+        const resultsCount = document.getElementById('resultsCount');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const debugInfo = document.getElementById('debugInfo');
+        const debugContent = document.getElementById('debugContent');
+
+        // 防止重复提交的标志
+        let isSearching = false;
+
+        // 移动端优化：触摸反馈
+        function addTouchFeedback(element) {
+            element.addEventListener('touchstart', function() {
+                this.style.transform = 'scale(0.98)';
+            });
+            element.addEventListener('touchend', function() {
+                this.style.transform = '';
+            });
+        }
+
+        searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // 如果正在搜索中，忽略新的提交
+            if (isSearching) {
+                return;
+            }
+            
+            const query = searchInput.value.trim();
+            const baseDir = baseDirInput.value.trim() || '.';
+            
+            if (!query) {
+                showError('请输入搜索关键词');
+                // 移动端优化：聚焦到搜索框
+                searchInput.focus();
+                return;
+            }
+            
+            // 移动端优化：隐藏虚拟键盘
+            searchInput.blur();
+            
+            // 设置搜索状态
+            isSearching = true;
+            
+            // 显示加载状态
+            setLoading(true);
+            hideError();
+            hideResults();
+            hideDebugInfo(); // 隐藏调试信息
+            
+            try {
+                const response = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        baseDir: baseDir
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(data.error);
+                } else {
+                    showResults(data.results);
+                }
+                
+                // 显示调试信息
+                if (data.debug) {
+                    showDebugInfo(data.debug);
+                }
+            } catch (err) {
+                // 忽略 NS_BINDING_ABORTED 错误
+                if (err.name !== 'NS_BINDING_ABORTED') {
+                    showError('搜索请求失败: ' + err.message);
+                }
+            } finally {
+                setLoading(false);
+                isSearching = false;
+            }
+        });
+
+        function setLoading(isLoading) {
+            if (isLoading) {
+                searchBtn.disabled = true;
+                searchBtnText.textContent = '搜索中...';
+                loading.style.display = 'block';
+            } else {
+                searchBtn.disabled = false;
+                searchBtnText.textContent = '搜索';
+                loading.style.display = 'none';
+            }
+        }
+
+        function showResults(results) {
+            resultsContainer.style.display = 'block';
+            
+            // 检查 results 是否为 null 或 undefined
+            if (!results || !Array.isArray(results)) {
+                resultsList.innerHTML = '<div class="empty-state"><h3>搜索结果格式错误</h3></div>';
+                resultsCount.textContent = '0 个结果';
+                return;
+            }
+            
+            if (results.length === 0) {
+                resultsList.innerHTML = '<div class="empty-state"><h3>没有找到匹配的文件</h3></div>';
+                resultsCount.textContent = '0 个结果';
+                return;
+            }
+            
+            resultsCount.textContent = results.length + ' 个结果';
+            
+            resultsList.innerHTML = results.map(function(result) {
+                // 检查 result 对象是否有效
+                if (!result || typeof result !== 'object') {
+                    return '';
+                }
+                
+                const filename = result.filename || '未知文件';
+                const path = result.path || '';
+                const size = result.size || 0;
+                
+                return '<div class="result-item"><div class="result-header"><div class="result-filename">' + escapeHtml(filename) + '</div><div class="result-size">' + formatFileSize(size) + '</div></div><div class="result-path">' + escapeHtml(path) + '</div><button class="download-btn" onclick="downloadFile(\'' + escapeHtml(path) + '\')">下载文件</button></div>';
+            }).join('');
+            
+            // 移动端优化：为下载按钮添加触摸反馈
+            setTimeout(() => {
+                const downloadBtns = document.querySelectorAll('.download-btn');
+                downloadBtns.forEach(addTouchFeedback);
+            }, 100);
+        }
+
+        function hideResults() {
+            resultsContainer.style.display = 'none';
+        }
+
+        function showError(message) {
+            error.textContent = message;
+            error.style.display = 'block';
+            // 移动端优化：滚动到错误信息
+            error.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function hideError() {
+            error.style.display = 'none';
+        }
+
+        function showDebugInfo(debugData) {
+            debugContent.textContent = JSON.stringify(debugData, null, 2);
+            debugInfo.style.display = 'block';
+        }
+
+        function hideDebugInfo() {
+            debugInfo.style.display = 'none';
+        }
+
+        function downloadFile(filePath) {
+            const searchDir = baseDirInput.value.trim() || '.';
+            const url = '/api/download?file=' + encodeURIComponent(filePath) + '&dir=' + encodeURIComponent(searchDir);
+            
+            // 移动端优化：显示下载提示
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = '下载中...';
+            btn.disabled = true;
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = '';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            // 恢复按钮状态
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 2000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 支持回车键搜索 - 直接触发表单提交，避免重复事件
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault(); // 阻止默认行为
+                searchForm.requestSubmit(); // 使用 requestSubmit 而不是 dispatchEvent
+            }
+        });
+
+        // 移动端优化：为搜索按钮添加触摸反馈
+        addTouchFeedback(searchBtn);
+
+        // 移动端优化：页面加载完成后聚焦到搜索框
+        document.addEventListener('DOMContentLoaded', function() {
+            // 延迟聚焦，确保页面完全加载
+            setTimeout(() => {
+                searchInput.focus();
+            }, 500);
+        });
+
+        // 移动端优化：处理虚拟键盘
+        let initialViewportHeight = window.innerHeight;
+        window.addEventListener('resize', function() {
+            if (window.innerHeight < initialViewportHeight) {
+                // 虚拟键盘打开，可以添加特殊处理
+                document.body.style.height = window.innerHeight + 'px';
+            } else {
+                // 虚拟键盘关闭
+                document.body.style.height = '';
+            }
+        });
+    </script>
+</body>
+</html> 
