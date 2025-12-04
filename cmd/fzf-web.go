@@ -25,15 +25,13 @@ type SearchResult struct {
 }
 
 type SearchRequest struct {
-	Query   string `json:"query"`
-	BaseDir string `json:"baseDir"`
-	UseAPI  bool   `json:"useAPI"` // 是否使用 fzf API
+	Query  string `json:"query"`
+	UseAPI bool   `json:"useAPI"` // 是否使用 fzf API
 }
 
 type SearchResponse struct {
-	Results []SearchResult         `json:"results"`
-	Error   string                 `json:"error,omitempty"`
-	Debug   map[string]interface{} `json:"debug,omitempty"` // 调试信息
+	Results []SearchResult `json:"results"`
+	Error   string         `json:"error,omitempty"`
 }
 
 var (
@@ -94,10 +92,8 @@ func main() {
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	data := map[string]interface{}{
-		"BaseDir": baseDir,
-	}
-	templates.ExecuteTemplate(w, "index", data)
+	// 不再需要传递BaseDir到模板
+	templates.ExecuteTemplate(w, "index", nil)
 }
 
 func handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -114,17 +110,14 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 使用提供的查询和目录
+	// 只使用命令行指定的目录，忽略用户请求中的目录
 	query := req.Query
-	searchDir := req.BaseDir
-	if searchDir == "" {
-		searchDir = baseDir
-	}
+	searchDir := baseDir // 直接使用命令行指定的目录
 
 	// 检查目录是否存在
 	if _, err := os.Stat(searchDir); os.IsNotExist(err) {
 		json.NewEncoder(w).Encode(SearchResponse{
-			Error: "目录不存在: " + searchDir,
+			Error: "搜索目录不存在: " + searchDir,
 		})
 		return
 	}
@@ -132,7 +125,6 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	// 执行fzf搜索
 	var results []SearchResult
 	var err error
-	var debugInfo = make(map[string]interface{})
 
 	// 首先尝试使用 fzf API 搜索
 	results, err = executeFzfSearchAPI(query, searchDir)
@@ -140,35 +132,23 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	// 如果 fzf 搜索失败或没有结果，尝试简单搜索
 	if err != nil || len(results) == 0 {
 		fmt.Printf("fzf 搜索失败或无结果，尝试简单搜索: %v\n", err)
-		debugInfo["fzf_error"] = err.Error()
 		simpleResults, simpleErr := executeSimpleSearch(query, searchDir)
 		if simpleErr == nil && len(simpleResults) > 0 {
 			results = simpleResults
 			err = nil
-			debugInfo["fallback_search"] = "使用简单搜索成功"
 			fmt.Printf("简单搜索成功，找到 %d 个结果\n", len(results))
-		} else {
-			debugInfo["simple_search_error"] = simpleErr.Error()
 		}
-	} else {
-		debugInfo["search_method"] = "fzf API"
 	}
-
-	debugInfo["query"] = query
-	debugInfo["search_dir"] = searchDir
-	debugInfo["results_count"] = len(results)
 
 	if err != nil {
 		json.NewEncoder(w).Encode(SearchResponse{
 			Error: "搜索失败: " + err.Error(),
-			Debug: debugInfo,
 		})
 		return
 	}
 
 	json.NewEncoder(w).Encode(SearchResponse{
 		Results: results,
-		Debug:   debugInfo,
 	})
 }
 
@@ -455,17 +435,14 @@ func getAllFiles(dir string) ([]string, error) {
 
 func handleDownload(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")
-	searchDir := r.URL.Query().Get("dir") // 获取搜索目录参数
 
 	if filePath == "" {
 		http.Error(w, "Missing file parameter", http.StatusBadRequest)
 		return
 	}
 
-	// 如果没有指定搜索目录，使用默认的 baseDir
-	if searchDir == "" {
-		searchDir = baseDir
-	}
+	// 直接使用命令行指定的目录
+	searchDir := baseDir
 
 	// 构建完整路径
 	fullPath := filepath.Join(searchDir, filePath)
