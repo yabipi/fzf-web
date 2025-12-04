@@ -274,32 +274,7 @@
             font-size: 1.1rem;
         }
         
-        .debug-info {
-            background: #f8f9fa;
-            border: 1px solid #e1e5e9;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            font-size: 0.8rem;
-            color: #666;
-        }
-        
-        .debug-info h4 {
-            margin-bottom: 8px;
-            color: #333;
-            font-size: 0.9rem;
-            font-weight: 600;
-        }
-        
-        .debug-info pre {
-            background: #fff;
-            padding: 12px;
-            border-radius: 8px;
-            border: 1px solid #e1e5e9;
-            overflow-x: auto;
-            font-size: 0.75rem;
-            line-height: 1.4;
-        }
+
         
         /* 移动端优化 */
         @media (max-width: 768px) {
@@ -415,10 +390,6 @@
         <div class="search-section">
             <form class="search-form" id="searchForm">
                 <div class="input-group">
-                    <label for="baseDirInput">搜索目录</label>
-                    <input type="text" id="baseDirInput" class="search-input" value="{{.BaseDir}}" placeholder="输入搜索目录路径...">
-                </div>
-                <div class="input-group">
                     <label for="searchInput">搜索关键词</label>
                     <input type="text" id="searchInput" class="search-input" placeholder="输入搜索关键词..." required>
                 </div>
@@ -428,12 +399,7 @@
             </form>
         </div>
         
-        <div class="results-section">
-            <div id="debugInfo" class="debug-info" style="display: none;">
-                <h4>调试信息</h4>
-                <pre id="debugContent"></pre>
-            </div>
-            
+                <div class="results-section">
             <div id="resultsContainer" style="display: none;">
                 <div class="results-header">
                     <h2>搜索结果</h2>
@@ -469,7 +435,6 @@
 
         const searchForm = document.getElementById('searchForm');
         const searchInput = document.getElementById('searchInput');
-        const baseDirInput = document.getElementById('baseDirInput');
         const searchBtn = document.getElementById('searchBtn');
         const searchBtnText = document.getElementById('searchBtnText');
         const resultsContainer = document.getElementById('resultsContainer');
@@ -477,8 +442,6 @@
         const resultsCount = document.getElementById('resultsCount');
         const loading = document.getElementById('loading');
         const error = document.getElementById('error');
-        const debugInfo = document.getElementById('debugInfo');
-        const debugContent = document.getElementById('debugContent');
 
         // 防止重复提交的标志
         let isSearching = false;
@@ -502,7 +465,6 @@
             }
             
             const query = searchInput.value.trim();
-            const baseDir = baseDirInput.value.trim() || '.';
             
             if (!query) {
                 showError('请输入搜索关键词');
@@ -521,7 +483,6 @@
             setLoading(true);
             hideError();
             hideResults();
-            hideDebugInfo(); // 隐藏调试信息
             
             try {
                 const response = await fetch('/api/search', {
@@ -530,8 +491,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        query: query,
-                        baseDir: baseDir
+                        query: query
                     })
                 });
                 
@@ -545,11 +505,6 @@
                     showError(data.error);
                 } else {
                     showResults(data.results);
-                }
-                
-                // 显示调试信息
-                if (data.debug) {
-                    showDebugInfo(data.debug);
                 }
             } catch (err) {
                 // 忽略 NS_BINDING_ABORTED 错误
@@ -627,18 +582,10 @@
             error.style.display = 'none';
         }
 
-        function showDebugInfo(debugData) {
-            debugContent.textContent = JSON.stringify(debugData, null, 2);
-            debugInfo.style.display = 'block';
-        }
 
-        function hideDebugInfo() {
-            debugInfo.style.display = 'none';
-        }
 
         function downloadFile(filePath) {
-            const searchDir = baseDirInput.value.trim() || '.';
-            const url = '/api/download?file=' + encodeURIComponent(filePath) + '&dir=' + encodeURIComponent(searchDir);
+            const url = '/api/download?file=' + encodeURIComponent(filePath);
             
             // 移动端优化：显示下载提示
             const btn = event.target;
