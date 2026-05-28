@@ -148,6 +148,65 @@
             color: #333;
             font-weight: 600;
         }
+
+        .batch-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #f0f7ff;
+            border-radius: 10px;
+            border: 1px solid #d0e7ff;
+        }
+
+        .select-all-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+            color: #333;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .result-checkbox,
+        .select-all-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .batch-download-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-height: 40px;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .batch-download-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .batch-download-btn:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        .selected-count {
+            font-size: 0.85rem;
+            color: #666;
+        }
         
         .results-count {
             font-size: 0.9rem;
@@ -188,12 +247,34 @@
             border-radius: 12px;
             padding: 16px;
             transition: all 0.3s ease;
-            cursor: pointer;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .result-item.selected {
+            border-color: #4facfe;
+            background: #f8fbff;
+        }
+
+        .result-select-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .result-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
         }
         
         .result-item:active {
-            transform: scale(0.98);
+            transform: scale(0.99);
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
         
@@ -238,7 +319,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
-            width: 100%;
+            flex: 1;
             min-height: 44px;
             display: flex;
             align-items: center;
@@ -405,6 +486,14 @@
                     <h2>搜索结果</h2>
                     <div class="results-count" id="resultsCount"></div>
                 </div>
+                <div id="batchActions" class="batch-actions" style="display: none;">
+                    <label class="select-all-label">
+                        <input type="checkbox" id="selectAllCheckbox" class="select-all-checkbox">
+                        <span>全选</span>
+                    </label>
+                    <span class="selected-count" id="selectedCount">已选 0 个</span>
+                    <button type="button" class="batch-download-btn" id="batchDownloadBtn" disabled>打包下载</button>
+                </div>
                 <div id="resultsList" class="results-list"></div>
             </div>
             
@@ -440,8 +529,15 @@
         const resultsContainer = document.getElementById('resultsContainer');
         const resultsList = document.getElementById('resultsList');
         const resultsCount = document.getElementById('resultsCount');
+        const batchActions = document.getElementById('batchActions');
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        const selectedCount = document.getElementById('selectedCount');
+        const batchDownloadBtn = document.getElementById('batchDownloadBtn');
         const loading = document.getElementById('loading');
         const error = document.getElementById('error');
+
+        let currentResults = [];
+        let lastSearchQuery = '';
 
         // 防止重复提交的标志
         let isSearching = false;
@@ -465,7 +561,8 @@
             }
             
             const query = searchInput.value.trim();
-            
+            lastSearchQuery = query;
+
             if (!query) {
                 showError('请输入搜索关键词');
                 // 移动端优化：聚焦到搜索框
@@ -531,41 +628,116 @@
 
         function showResults(results) {
             resultsContainer.style.display = 'block';
-            
-            // 检查 results 是否为 null 或 undefined
-            if (!results || !Array.isArray(results)) {
+
+            if (results == null) {
+                results = [];
+            }
+
+            if (!Array.isArray(results)) {
                 resultsList.innerHTML = '<div class="empty-state"><h3>搜索结果格式错误</h3></div>';
                 resultsCount.textContent = '0 个结果';
+                batchActions.style.display = 'none';
+                currentResults = [];
                 return;
             }
-            
+
+            currentResults = results;
+
             if (results.length === 0) {
                 resultsList.innerHTML = '<div class="empty-state"><h3>没有找到匹配的文件</h3></div>';
                 resultsCount.textContent = '0 个结果';
+                batchActions.style.display = 'none';
                 return;
             }
-            
+
             resultsCount.textContent = results.length + ' 个结果';
-            
-            resultsList.innerHTML = results.map(function(result) {
-                // 检查 result 对象是否有效
+            batchActions.style.display = 'flex';
+            selectAllCheckbox.checked = false;
+            updateSelectedCount();
+
+            resultsList.innerHTML = results.map(function(result, index) {
                 if (!result || typeof result !== 'object') {
                     return '';
                 }
-                
+
                 const filename = result.filename || '未知文件';
                 const path = result.path || '';
                 const size = result.size || 0;
-                
-                return '<div class="result-item"><div class="result-header"><div class="result-filename">' + escapeHtml(filename) + '</div><div class="result-size">' + formatFileSize(size) + '</div></div><div class="result-path">' + escapeHtml(path) + '</div><button class="download-btn" onclick="downloadFile(\'' + escapeHtml(path) + '\')">下载文件</button></div>';
+
+                return '<div class="result-item" data-index="' + index + '">' +
+                    '<div class="result-select-row">' +
+                    '<input type="checkbox" class="result-checkbox" data-index="' + index + '">' +
+                    '<div class="result-content">' +
+                    '<div class="result-header"><div class="result-filename">' + escapeHtml(filename) + '</div>' +
+                    '<div class="result-size">' + formatFileSize(size) + '</div></div>' +
+                    '<div class="result-path">' + escapeHtml(path) + '</div>' +
+                    '</div></div>' +
+                    '<div class="result-actions">' +
+                    '<button type="button" class="download-btn" data-index="' + index + '">下载文件</button>' +
+                    '</div></div>';
             }).join('');
-            
-            // 移动端优化：为下载按钮添加触摸反馈
-            setTimeout(() => {
-                const downloadBtns = document.querySelectorAll('.download-btn');
-                downloadBtns.forEach(addTouchFeedback);
-            }, 100);
+
+            bindResultEvents();
         }
+
+        function bindResultEvents() {
+            resultsList.querySelectorAll('.result-checkbox').forEach(function(checkbox) {
+                checkbox.addEventListener('change', function() {
+                    const item = checkbox.closest('.result-item');
+                    if (item) {
+                        item.classList.toggle('selected', checkbox.checked);
+                    }
+                    updateSelectedCount();
+                });
+            });
+
+            resultsList.querySelectorAll('.download-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const index = parseInt(btn.dataset.index, 10);
+                    downloadFile(index, btn);
+                });
+                addTouchFeedback(btn);
+            });
+        }
+
+        function getSelectedIndices() {
+            return Array.from(resultsList.querySelectorAll('.result-checkbox:checked'))
+                .map(function(cb) { return parseInt(cb.dataset.index, 10); })
+                .filter(function(index) { return !isNaN(index); });
+        }
+
+        function updateSelectedCount() {
+            const selected = getSelectedIndices();
+            selectedCount.textContent = '已选 ' + selected.length + ' 个';
+            batchDownloadBtn.disabled = selected.length === 0;
+            batchDownloadBtn.textContent = selected.length > 0
+                ? '打包下载 (' + selected.length + ')'
+                : '打包下载';
+
+            const allCheckboxes = resultsList.querySelectorAll('.result-checkbox');
+            if (allCheckboxes.length === 0) {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = false;
+                return;
+            }
+            selectAllCheckbox.checked = selected.length === allCheckboxes.length;
+            selectAllCheckbox.indeterminate = selected.length > 0 && selected.length < allCheckboxes.length;
+        }
+
+        selectAllCheckbox.addEventListener('change', function() {
+            const checked = selectAllCheckbox.checked;
+            resultsList.querySelectorAll('.result-checkbox').forEach(function(checkbox) {
+                checkbox.checked = checked;
+                const item = checkbox.closest('.result-item');
+                if (item) {
+                    item.classList.toggle('selected', checked);
+                }
+            });
+            updateSelectedCount();
+        });
+
+        batchDownloadBtn.addEventListener('click', downloadSelected);
+        addTouchFeedback(batchDownloadBtn);
 
         function hideResults() {
             resultsContainer.style.display = 'none';
@@ -584,33 +756,132 @@
 
 
 
-        function downloadFile(filePath) {
-            const url = '/api/download?file=' + encodeURIComponent(filePath);
-            
-            // 移动端优化：显示下载提示
-            const btn = event.target;
+        function downloadFile(index, btn) {
+            const result = currentResults[index];
+            if (!result || !result.path) {
+                showError('无效的文件路径');
+                return;
+            }
+
+            const url = '/api/download?file=' + encodeURIComponent(result.path);
             const originalText = btn.textContent;
             btn.textContent = '下载中...';
             btn.disabled = true;
-            
+
             const link = document.createElement('a');
             link.href = url;
-            link.download = '';
+            link.download = result.filename || '';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
-            // 恢复按钮状态
-            setTimeout(() => {
+
+            setTimeout(function() {
                 btn.textContent = originalText;
                 btn.disabled = false;
             }, 2000);
+        }
+
+        async function downloadSelected() {
+            const indices = getSelectedIndices();
+            if (indices.length === 0) {
+                showError('请至少选择一个文件');
+                return;
+            }
+
+            const files = indices
+                .map(function(index) { return currentResults[index]; })
+                .filter(function(result) { return result && result.path; })
+                .map(function(result) { return result.path; });
+
+            if (files.length === 0) {
+                showError('没有有效的文件可下载');
+                return;
+            }
+
+            const originalText = batchDownloadBtn.textContent;
+            batchDownloadBtn.textContent = '打包中...';
+            batchDownloadBtn.disabled = true;
+            hideError();
+
+            const query = searchInput.value.trim() || lastSearchQuery;
+            const zipName = zipFilenameFromQuery(query);
+
+            try {
+                const response = await fetch('/api/download-batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ files: files, query: query })
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                }
+
+                const blob = await response.blob();
+                const downloadName = filenameFromContentDisposition(
+                    response.headers.get('Content-Disposition')
+                ) || zipName;
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = downloadName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                showError('打包下载失败: ' + err.message);
+            } finally {
+                updateSelectedCount();
+                if (batchDownloadBtn.textContent === '打包中...') {
+                    batchDownloadBtn.textContent = originalText;
+                }
+            }
         }
 
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function zipFilenameFromQuery(query) {
+            let name = (query || '').trim();
+            if (!name) {
+                return 'search.zip';
+            }
+            name = name.replace(/[/\\:*?"<>|\r\n\t]/g, '').trim();
+            if (!name) {
+                return 'search.zip';
+            }
+            if (name.length > 100) {
+                name = name.slice(0, 100);
+            }
+            if (!/\.zip$/i.test(name)) {
+                name += '.zip';
+            }
+            return name;
+        }
+
+        function filenameFromContentDisposition(header) {
+            if (!header) {
+                return '';
+            }
+            const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+            if (utf8Match) {
+                try {
+                    return decodeURIComponent(utf8Match[1].trim());
+                } catch (e) {
+                    return '';
+                }
+            }
+            const asciiMatch = header.match(/filename="([^"]+)"/i);
+            if (asciiMatch) {
+                return asciiMatch[1];
+            }
+            return '';
         }
 
         function formatFileSize(bytes) {

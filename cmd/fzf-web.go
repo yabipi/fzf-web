@@ -1,16 +1,20 @@
 package main
 
 import (
+	"archive/zip"
 	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	fzf "github.com/junegunn/fzf/src"
 )
@@ -32,6 +36,11 @@ type SearchRequest struct {
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 	Error   string         `json:"error,omitempty"`
+}
+
+type BatchDownloadRequest struct {
+	Files []string `json:"files"`
+	Query string   `json:"query"`
 }
 
 var (
@@ -74,6 +83,7 @@ func main() {
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/api/search", handleSearch)
 	http.HandleFunc("/api/download", handleDownload)
+	http.HandleFunc("/api/download-batch", handleBatchDownload)
 
 	// 设置静态文件服务
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
@@ -145,6 +155,10 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 			Error: "搜索失败: " + err.Error(),
 		})
 		return
+	}
+
+	if results == nil {
+		results = []SearchResult{}
 	}
 
 	json.NewEncoder(w).Encode(SearchResponse{
@@ -231,25 +245,17 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 		return nil, err
 	}
 
-	// 限制文件数量，避免处理过多文件
-
-	// if len(files) > 15000 {
-	// 	files = files[:15000]
-	// 	fmt.Printf("文件数量过多，限制为 %d 个文件进行搜索\n", len(files))
-	// }
-
-	//if len(files) > 10000 {
-	//	files = files[:10000]
-	//}
-
-	// 添加调试信息
 	fmt.Printf("开始搜索，查询: %s, 文件数量: %d\n", query, len(files))
 
 	// 创建输入通道
 	inputChan := make(chan string, len(files))
 
-	// 创建输出通道
-	outputChan := make(chan string, 100)
+	// 输出通道缓冲区与文件数一致，避免大量匹配结果时阻塞
+	outputBuf := len(files)
+	if outputBuf < 100 {
+		outputBuf = 100
+	}
+	outputChan := make(chan string, outputBuf)
 
 	// 创建结果收集通道
 	resultsChan := make(chan []SearchResult, 1)
@@ -321,6 +327,9 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 
 	// 等待结果收集完成
 	results := <-resultsChan
+	if results == nil {
+		results = []SearchResult{}
+	}
 
 	// 添加调试信息
 	fmt.Printf("搜索完成，找到 %d 个结果\n", len(results))
@@ -360,22 +369,18 @@ func executeSimpleSearch(query, searchDir string) ([]SearchResult, error) {
 	}
 
 	fmt.Printf("简单搜索完成，找到 %d 个结果\n", len(results))
+	if results == nil {
+		results = []SearchResult{}
+	}
 	return results, nil
 }
 
 func getAllFiles(dir string) ([]string, error) {
 	var files []string
-	count := 0
-	maxFiles := 100000 // 增加文件数量限制
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
-		}
-
-		// 限制文件数量
-		if count >= maxFiles {
-			return filepath.SkipAll
 		}
 
 		// 跳过隐藏文件和目录（但保留一些重要的隐藏文件）
@@ -418,64 +423,181 @@ func getAllFiles(dir string) ([]string, error) {
 				return err
 			}
 			files = append(files, relPath)
-			count++
 		}
 
 		return nil
 	})
 
-	// 添加调试信息
 	fmt.Printf("扫描目录 %s，找到 %d 个文件\n", dir, len(files))
-	if len(files) >= maxFiles {
-		fmt.Printf("警告：文件数量达到限制 %d，可能遗漏了一些文件\n", maxFiles)
-	}
 
 	return files, err
+}
+
+func resolveFileInSearchDir(filePath, searchDir string) (string, error) {
+	if filePath == "" {
+		return "", fmt.Errorf("empty file path")
+	}
+
+	fullPath := filepath.Join(searchDir, filePath)
+
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid file path")
+	}
+
+	absSearchDir, err := filepath.Abs(searchDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid search directory")
+	}
+
+	absPath = filepath.Clean(absPath)
+	absSearchDir = filepath.Clean(absSearchDir)
+	if absPath != absSearchDir && !strings.HasPrefix(absPath, absSearchDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("access denied")
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return "", fmt.Errorf("file not found")
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("not a file")
+	}
+
+	return fullPath, nil
 }
 
 func handleDownload(w http.ResponseWriter, r *http.Request) {
 	filePath := r.URL.Query().Get("file")
 
-	if filePath == "" {
-		http.Error(w, "Missing file parameter", http.StatusBadRequest)
-		return
-	}
-
-	// 直接使用命令行指定的目录
-	searchDir := baseDir
-
-	// 构建完整路径
-	fullPath := filepath.Join(searchDir, filePath)
-
-	// 安全检查：确保文件在指定目录内
-	absPath, err := filepath.Abs(fullPath)
+	fullPath, err := resolveFileInSearchDir(filePath, baseDir)
 	if err != nil {
-		http.Error(w, "Invalid file path", http.StatusBadRequest)
+		switch err.Error() {
+		case "empty file path", "invalid file path":
+			http.Error(w, "Invalid file path", http.StatusBadRequest)
+		case "access denied":
+			http.Error(w, "Access denied", http.StatusForbidden)
+		case "file not found", "not a file":
+			http.Error(w, "File not found", http.StatusNotFound)
+		default:
+			http.Error(w, "Invalid search directory", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	absSearchDir, err := filepath.Abs(searchDir)
-	if err != nil {
-		http.Error(w, "Invalid search directory", http.StatusInternalServerError)
-		return
-	}
-
-	if !strings.HasPrefix(absPath, absSearchDir) {
-		http.Error(w, "Access denied", http.StatusForbidden)
-		return
-	}
-
-	// 检查文件是否存在
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-
-	// 设置下载头
 	filename := filepath.Base(filePath)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
-
-	// 提供文件下载
 	http.ServeFile(w, r, fullPath)
+}
+
+func zipFilenameFromQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "search.zip"
+	}
+
+	var b strings.Builder
+	for _, r := range query {
+		if unicode.IsControl(r) || r == '/' || r == '\\' || r == ':' ||
+			r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+
+	name := strings.TrimSpace(b.String())
+	if name == "" {
+		return "search.zip"
+	}
+	if len(name) > 100 {
+		name = name[:100]
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".zip") {
+		name += ".zip"
+	}
+	return name
+}
+
+func attachmentContentDisposition(filename string) string {
+	ascii := filename
+	for _, r := range filename {
+		if r >= 128 || r == '"' || r == '\\' {
+			ascii = "search.zip"
+			break
+		}
+	}
+	encoded := strings.ReplaceAll(url.QueryEscape(filename), "+", "%20")
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii, encoded)
+}
+
+func handleBatchDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BatchDownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Files) == 0 {
+		http.Error(w, "No files selected", http.StatusBadRequest)
+		return
+	}
+
+	var validFiles []string
+	for _, filePath := range req.Files {
+		if _, err := resolveFileInSearchDir(filePath, baseDir); err == nil {
+			validFiles = append(validFiles, filePath)
+		}
+	}
+	if len(validFiles) == 0 {
+		http.Error(w, "No valid files to download", http.StatusBadRequest)
+		return
+	}
+
+	zipName := zipFilenameFromQuery(req.Query)
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", attachmentContentDisposition(zipName))
+
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
+
+	for _, filePath := range validFiles {
+		fullPath, err := resolveFileInSearchDir(filePath, baseDir)
+		if err != nil {
+			continue
+		}
+
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			continue
+		}
+
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			continue
+		}
+		header.Name = filepath.Base(filePath)
+		header.Method = zip.Deflate
+
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			continue
+		}
+
+		file, err := os.Open(fullPath)
+		if err != nil {
+			continue
+		}
+
+		_, copyErr := io.Copy(writer, file)
+		file.Close()
+		if copyErr != nil {
+			continue
+		}
+	}
 }
