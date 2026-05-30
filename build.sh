@@ -30,7 +30,7 @@ CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
   -trimpath \
   -ldflags="-s -w" \
   -o "${OUTPUT_DIR}/${BINARY_NAME}" \
-  ./cmd/fzf-web.go
+  ./cmd
 
 chmod +x "${OUTPUT_DIR}/${BINARY_NAME}"
 

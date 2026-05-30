@@ -97,7 +97,7 @@ func main() {
 	fmt.Printf("搜索目录: %s\n", baseDir)
 	fmt.Printf("使用 -d 或 --dir 参数可以指定其他搜索目录\n")
 	fmt.Printf("使用 -p 或 --port 参数可以指定服务器端口\n")
-	fmt.Printf("示例: go run fzf-web.go -d /path/to/search -p 3000\n")
+	fmt.Printf("示例: go run ./cmd -d /path/to/search -p 3000\n")
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
