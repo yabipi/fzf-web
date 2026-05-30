@@ -136,8 +136,14 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	var results []SearchResult
 	var err error
 
+	filterQuery := buildFzfFilterQuery(query)
+	if filterQuery == "" {
+		json.NewEncoder(w).Encode(SearchResponse{Results: []SearchResult{}})
+		return
+	}
+
 	// 首先尝试使用 fzf API 搜索
-	results, err = executeFzfSearchAPI(query, searchDir)
+	results, err = executeFzfSearchAPI(query, filterQuery, searchDir)
 
 	// 如果 fzf 搜索失败或没有结果，尝试简单搜索
 	if err != nil || len(results) == 0 {
@@ -238,14 +244,14 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 //}
 
 // executeFzfSearchAPI 使用 fzf 的 Go API 进行搜索
-func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
+func executeFzfSearchAPI(originalQuery, filterQuery, searchDir string) ([]SearchResult, error) {
 	// 获取所有文件列表
 	files, err := getAllFiles(searchDir)
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("开始搜索，查询: %s, 文件数量: %d\n", query, len(files))
+	fmt.Printf("开始搜索，查询: %s, fzf 过滤: %s, 文件数量: %d\n", originalQuery, filterQuery, len(files))
 
 	// 创建输入通道
 	inputChan := make(chan string, len(files))
@@ -260,13 +266,21 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 	// 创建结果收集通道
 	resultsChan := make(chan []SearchResult, 1)
 
+	skipQueryLines := map[string]struct{}{
+		originalQuery: {},
+		filterQuery:   {},
+	}
+
 	// 在 goroutine 中收集输出
 	go func() {
 		var results []SearchResult
 		for s := range outputChan {
 			line := strings.TrimSpace(s)
-			if line == "" || line == query {
-				continue // 跳过空行和查询行
+			if line == "" {
+				continue
+			}
+			if _, skip := skipQueryLines[line]; skip {
+				continue // 跳过 --print-query 输出的查询行
 			}
 
 			fullPath := filepath.Join(searchDir, line)
@@ -288,11 +302,11 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 	options, err := fzf.ParseOptions(
 		false, // 不加载默认选项，避免冲突
 		[]string{
-			"--filter", query,
+			"--filter", filterQuery,
 			"--no-mouse",
 			"--no-color",
 			"--print-query",
-			"--extended", // 启用扩展搜索模式
+			"--extended", // 空格分隔多词为 AND
 			"--no-sort",  // 不排序，保持原始顺序
 			"--tac",      // 反转输入顺序，新文件在前
 		},
@@ -339,33 +353,36 @@ func executeFzfSearchAPI(query, searchDir string) ([]SearchResult, error) {
 
 // executeSimpleSearch 使用简单的字符串匹配作为备用搜索方法
 func executeSimpleSearch(query, searchDir string) ([]SearchResult, error) {
+	terms := splitSearchTerms(query)
+	if len(terms) == 0 {
+		return []SearchResult{}, nil
+	}
+
 	// 获取所有文件列表
 	files, err := getAllFiles(searchDir)
 	if err != nil {
 		return nil, err
 	}
 
-	query = strings.ToLower(query)
 	var results []SearchResult
 
 	for _, file := range files {
-		filename := strings.ToLower(filepath.Base(file))
-		path := strings.ToLower(file)
-
-		// 检查文件名或路径是否包含查询
-		if strings.Contains(filename, query) || strings.Contains(path, query) {
-			fullPath := filepath.Join(searchDir, file)
-			info, err := os.Stat(fullPath)
-			if err != nil {
-				continue
-			}
-
-			results = append(results, SearchResult{
-				Path:     file,
-				Filename: filepath.Base(file),
-				Size:     info.Size(),
-			})
+		filename := filepath.Base(file)
+		if !matchesAllTerms(filename, terms) && !matchesAllTerms(file, terms) {
+			continue
 		}
+
+		fullPath := filepath.Join(searchDir, file)
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			continue
+		}
+
+		results = append(results, SearchResult{
+			Path:     file,
+			Filename: filename,
+			Size:     info.Size(),
+		})
 	}
 
 	fmt.Printf("简单搜索完成，找到 %d 个结果\n", len(results))
